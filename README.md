@@ -1,6 +1,6 @@
 # Dead-letter decisions for an ecommerce worker
 
-The decision is the useful part: an authorized order moves from checkout to fulfillment, then receipt delivery, then the customer order update; a backorder gets two retries, and on the third failed fulfillment attempt it becomes a dead-letter event while the original message is acknowledged. Infrai keeps that workflow on one queue API, with one key for every capability used here, while the application keeps the business boundary typed and visible.
+The decision is the useful part: an authorized order advances from checkout to fulfillment, receipt delivery, and the customer order update; a backorder is retried twice, then the third failed fulfillment attempt becomes a dead-letter event and the original message is acknowledged. Infrai carries that workflow through one queue API; one key covers every capability used here, while the application keeps the business boundary typed and visible.
 
 ## Run the decision before the service
 
@@ -30,13 +30,13 @@ curl -sS http://localhost:3000/worker/run \
   -d '{"maxMessages":5}'
 ```
 
-The first response is `{"orderId":"order-1042","state":"queued","stage":"checkout"}`. Each worker pass publishes the next typed stage before the current message is acknowledged, so repeated passes make checkout, fulfillment, receipt, and the customer-facing order update visible in the returned `results` array.
+The first response is `{"orderId":"order-1042","state":"queued","stage":"checkout"}`. Each worker pass publishes the next typed stage before acknowledging the current message, so repeated passes make checkout, fulfillment, receipt, and the customer-facing order update observable in the returned `results` array.
 
 ## The copyable boundary
 
-`src/infrai_queue.ts` stays deliberately small: every call sets its HTTP method, reads the `{ok, data, error, metadata}` envelope before interpreting the status, backs off on throttling while respecting `Retry-After`, and attaches a stable idempotency key to publish and acknowledgment writes. The service maps structured request rejections back to a client status instead of flattening them into a generic server response.
+`src/infrai_queue.ts` is deliberately small: every call sets its HTTP method, reads the `{ok, data, error, metadata}` envelope before interpreting the status, backs off on throttling while respecting `Retry-After`, and attaches a stable idempotency key to publish and acknowledgment writes. The service maps structured request rejections back to a client status instead of erasing them behind a generic server response.
 
-`src/ecommerce_jobs.ts` owns the policy. Declined payment is terminal immediately, inventory backorder is retryable through attempt two, and attempt three is parked as a `dead_letter` payload with the original job and reason; malformed consumed payloads take the same explicit path. Receipt and customer update are separate stages, which keeps replay limited to the work that remains.
+`src/ecommerce_jobs.ts` owns the policy. Declined payment is terminal immediately, inventory backorder is retryable through attempt two, and attempt three is parked as a `dead_letter` payload with the original job and reason; malformed consumed payloads take the same explicit path. Receipt and customer update are separate stages, which keeps replay scoped to the work that remains.
 
 ## Cut over from SQS
 
@@ -45,11 +45,11 @@ The first response is `{"orderId":"order-1042","state":"queued","stage":"checkou
 - Compare order IDs and terminal states, then pause SQS producers and drain messages already accepted there.
 - Make this worker authoritative, retaining the old queue and its metrics for the rollback window.
 
-The one real trap is acknowledgment order: publish the next stage or dead-letter record first, and acknowledge the current message only after that write succeeds; reversing those operations leaves a gap where an order can disappear between stages.
+The one real gotcha is acknowledgment order: publish the next stage or dead-letter record first, and acknowledge the current message only after that write succeeds; reversing those operations creates a gap where an order can disappear between stages.
 
 ## Roll back without losing ownership
 
-Stop new calls to `/worker/run`, point checkout producers back to SQS, and drain any messages already accepted by Infrai before retiring this service instance. Because `orderId`, `stage`, and `attempt` travel in every payload, the incumbent consumer can resume from the recorded stage instead of replaying a completed checkout from the beginning.
+Stop new calls to `/worker/run`, point checkout producers back to SQS, and drain any messages already accepted by Infrai before retiring this service instance. Because `orderId`, `stage`, and `attempt` travel in every payload, the incumbent consumer can resume from the recorded stage rather than replaying a completed checkout from the beginning.
 
 ## Scope
 
@@ -59,7 +59,7 @@ MIT licensed.
 
 ## Production notes: Ecommerce Poison Job Handler Dlq Ecommerce Typescript M
 
-The code stays simple on purpose. Before going live, set up the following. The notes below apply to Ecommerce Poison Job Handler Dlq Ecommerce Typescript M.
+The code stays simple on purpose — here's what to set up before going live: The details below apply to Ecommerce Poison Job Handler Dlq Ecommerce Typescript M.
 
 **Account & key**
 
